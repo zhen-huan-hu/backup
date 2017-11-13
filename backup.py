@@ -18,10 +18,9 @@ def parse_input():
         sys.exit()
     return parser.parse_args()
 
-def list_archives_sorted(tardir):
+def list_archives(tardir, tarpattern):
     try:
-        # List and sort all files that match the archive naming pattern
-        tarpattern = re.compile('{0}-\d{{4}}-\d{{2}}-\d{{2}}-\d{{3,}}'.format(socket.gethostname()))
+        # List all files matching the naming pattern by their modification dates
         tarfiles = [os.path.join(tardir, f) for f in os.listdir(tardir)
                 if os.path.isfile(os.path.join(tardir, f)) and tarpattern.match(f)]
         tarfiles.sort(key=os.path.getmtime)
@@ -31,21 +30,20 @@ def list_archives_sorted(tardir):
         return []
 
 def purge_archives(tardir, keep):
-    tarfiles = list_archives_sorted(tardir)
+    tarpattern = re.compile('{0}-\d{{4}}-\d{{2}}-\d{{2}}-\d{{3,}}'.format(socket.gethostname()))
+    tarfiles = list_archives(tardir, tarpattern)
 
     if keep > 0 and len(tarfiles) > keep:
         for f in tarfiles[:-keep]:
             os.remove(f)
 
 def get_archive_name(tardir, compress):
-    count = 0
-    tardir = os.path.normpath(tardir)
     tarpattern = re.compile('{0}-{1:%Y-%m-%d}-(\d{{3,}})'.format(socket.gethostname(), datetime.date.today()))
-    tarfilenames = [os.path.split(f)[1] for f in list_archives_sorted(tardir)]
-    tarfilenames = [fn for fn in tarfilenames if tarpattern.match(fn)]
-    if len(tarfilenames) > 0:
-        count = int(tarpattern.match(tarfilenames[-1]).group(1)) + 1
-    target = tardir + os.sep + '{0}-{1:%Y-%m-%d}-{2:03d}'.format(socket.gethostname(), datetime.date.today(), count) + ('.tar.lzma' if compress else '.tar')
+    tarfilenames = [os.path.split(f)[1] for f in list_archives(tardir, tarpattern)]
+    count = int(tarpattern.match(tarfilenames[-1]).group(1)) + 1 if len(tarfilenames) > 0 else 0
+    target = os.path.join(tardir,
+            '{0}-{1:%Y-%m-%d}-{2:03d}'.format(socket.gethostname(), datetime.date.today(), count)
+            + ('.tar.lzma' if compress else '.tar'))
     return target
 
 def archive_files(source, target, compress=False, filetype=[], limit=0, verbose=False):
