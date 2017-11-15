@@ -1,12 +1,14 @@
 ﻿import argparse
 import os, sys, socket, datetime, re
 import tarfile
+import pyrsync2
 
 def parse_input():
     parser = argparse.ArgumentParser(description='Simple script to backup files in a TAR archive.')
     parser.add_argument('-t', '--target', nargs=1, required=True, help='target directory')
     parser.add_argument('-s', '--source', nargs='+', required=True, help='source directories or files')
     parser.add_argument('-e', '--extract-mode', action='store_true', help='toggle extract mode')
+    parser.add_argument('-d', '--diff', nargs=1, help='source diff file', default=[])
     parser.add_argument('-c', '--compress', action='store_true', help='compress the archive')
     parser.add_argument('-l', '--size-limit', dest='size', nargs=1, type=int, help='exclude files larger than specified size, in bytes', default=[0])
     parser.add_argument('-f', '--file-type', dest='filetype', nargs='+', help='select file types to be archived', default=[])
@@ -30,12 +32,15 @@ def list_archives(tardir, tarpattern):
         return []
 
 def purge_archives(tardir, keep):
+    count = 0
     tarpattern = re.compile('{0}-\d{{4}}-\d{{2}}-\d{{2}}-\d{{3,}}'.format(socket.gethostname()))
-    tarfiles = list_archives(tardir, tarpattern)
-
-    if keep > 0 and len(tarfiles) > keep:
-        for f in tarfiles[:-keep]:
-            os.remove(f)
+    tarextpattern = re.compile('\.tar(\.lzma)$')
+    for tarpath in reversed(list_archives(tardir, tarpattern)):
+        if count < keep:
+            if re.search(tarextpattern, tarpath):
+                count += 1
+        else:
+            os.remove(tarpath)
 
 def get_archive_name(tardir, compress):
     tarpattern = re.compile('{0}-{1:%Y-%m-%d}-(\d{{3,}})'.format(socket.gethostname(), datetime.date.today()))
@@ -46,7 +51,7 @@ def get_archive_name(tardir, compress):
             + ('.tar.lzma' if compress else '.tar'))
     return target
 
-def archive_files(source, target, compress=False, filetype=[], limit=0, verbose=False):
+def archive_files(source, target, compress=False, filetype=None, limit=0, verbose=False):
     try:
         # Open TAR file for LZMA compressed writing
         with tarfile.open(target, 'w:xz' if compress else 'w') as target_fid:
@@ -54,7 +59,24 @@ def archive_files(source, target, compress=False, filetype=[], limit=0, verbose=
                 if verbose:
                     print('Adding {}'.format(root))
                 target_fid.add(root, filter=lambda fileinfo:
-                        None if fileinfo.isfile() and ((len(filetype) > 0 and os.path.splitext(fileinfo.name)[1] not in filetype) or (limit > 0 and fileinfo.size > limit)) else fileinfo)
+                        None if fileinfo.isfile() and ((filetype is not None and os.path.splitext(fileinfo.name)[1] not in filetype) or (limit > 0 and fileinfo.size > limit)) else fileinfo)
+
+        # Delta encoding
+        tardir, tarfilename = os.path.split(target)
+        target_iteration = list_archives(tardir, re.compile(re.match('{0}-\d{{4}}-\d{{2}}'.format(socket.gethostname()), tarfilename).group(0)))
+        if len(target_iteration) > 1:
+            with open(target_iteration[0], 'rb') as target_father_fid, open(target, 'rb') as target_fid, open(target + '.diff', 'wb') as target_diff_fid:
+                hashes = pyrsync2.blockchecksums(target_father_fid)
+                delta = pyrsync2.rsyncdelta(target_fid, hashes)
+                for element in delta:
+                    if isinstance(element, int):
+                        target_diff_fid.write(b'\x00\x00')
+                        target_diff_fid.write(element.to_bytes(8, byteorder=sys.byteorder))
+                    else:
+                        target_diff_fid.write(len(element).to_bytes(2, byteorder=sys.byteorder))
+                        target_diff_fid.write(element)
+            os.remove(target)
+
         return True
 
     except FileNotFoundError as not_found:
@@ -69,10 +91,26 @@ def archive_files(source, target, compress=False, filetype=[], limit=0, verbose=
 
     return False
 
-def extract_files(source, target, verbose=False):
+def extract_files(source, target, diff=None, verbose=False):
     try:
-        with tarfile.open(source) as target_fid:
+        if diff is not None:
+            with open(source, 'rb') as target_fid, open(diff, 'rb') as target_diff_fid, open(source + '.tmp', 'wb') as target_tmp_fid:
+                byte = target_diff_fid.read(2)
+                while byte:
+                    if byte == b'\x00\x00':
+                        offset = int.from_bytes(target_diff_fid.read(8), byteorder=sys.byteorder)
+                        target_fid.seek(offset * 4096)
+                        target_tmp_fid.write(target_fid.read(4096))
+                    else:
+                        target_tmp_fid.write(target_diff_fid.read(int.from_bytes(byte, byteorder=sys.byteorder)))
+                    byte = target_diff_fid.read(2)
+
+        with tarfile.open(source if diff is None else source + '.tmp') as target_fid:
             target_fid.extractall(target)
+
+        if diff is not None:
+            os.remove(source + '.tmp')
+
         return True
 
     except FileNotFoundError as not_found:
@@ -89,12 +127,12 @@ def extract_files(source, target, verbose=False):
 def main():
     arg = parse_input()
     if arg.extract_mode:
-        rc = extract_files(arg.source[0], arg.target[0], arg.verbose)
+        rc = extract_files(arg.source[0], arg.target[0], (arg.diff[0] if len(arg.diff) > 0 else None), arg.verbose)
         if rc and arg.verbose:
             print('Extract completed')
 
     else:
-        rc = archive_files(arg.source, get_archive_name(arg.target[0], arg.compress), arg.compress, arg.filetype, arg.size[0], arg.verbose)
+        rc = archive_files(arg.source, get_archive_name(arg.target[0], arg.compress), arg.compress, (arg.filetype if len(arg.filetype) > 0 else None), arg.size[0], arg.verbose)
         if rc:
             if arg.verbose:
                 print('Archive completed')
