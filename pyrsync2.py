@@ -23,7 +23,6 @@ __all__ = [
     "rollingchecksum",
     "weakchecksum",
     "patchstream",
-    "patchstream_block",
     "rsyncdelta",
     "blockchecksums"
 ]
@@ -140,13 +139,6 @@ def patchstream(instream, outstream, delta, blocksize=4096):
             instream.seek(element * blocksize)
             element = instream.read(blocksize)
         outstream.write(element)
-
-
-def patchstream_block(instream, outstream, delta_block, blocksize=4096):
-    if isinstance(delta_block, int) and blocksize:
-        instream.seek(delta_block * blocksize)
-        delta_block = instream.read(blocksize)
-    outstream.write(delta_block)
 
 
 def rollingchecksum(removed, new, a, b, blocksize=4096):
