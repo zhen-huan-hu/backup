@@ -1,5 +1,6 @@
 ﻿import argparse
 import datetime
+import io
 import os
 import re
 import socket
@@ -155,7 +156,7 @@ def extract_files(source, target, diff=None, verbose=False):
         if diff is not None:
             with open(source, 'rb') as source_fid, \
                     open(diff, 'rb') as diff_fid, \
-                    open(source + '.tmp', 'wb') as tmp_fid:
+                    io.BytesIO() as tmp_fid:
                 byte = diff_fid.read(2)
                 while byte:
                     if byte == b'\x00\x00':
@@ -168,11 +169,12 @@ def extract_files(source, target, diff=None, verbose=False):
                                 diff_fid.read(
                                     int.from_bytes(byte, byteorder='big')))
                     byte = diff_fid.read(2)
-
-        with tarfile.open(
-                source if diff is None
-                else source + '.tmp') as source_fid:
-            source_fid.extractall(target)
+                tmp_fid.seek(0)
+                with tarfile.open(mode='r|*', fileobj=tmp_fid) as tmp_tarfid:
+                    tmp_tarfid.extractall(target)
+        else:
+            with tarfile.open(source, mode='r') as source_fid:
+                source_fid.extractall(target)
 
     except FileNotFoundError as not_found:
         if not_found.filename == target:
@@ -184,8 +186,6 @@ def extract_files(source, target, diff=None, verbose=False):
             return False
 
     else:
-        if diff is not None:
-            os.remove(source + '.tmp')
         return True
 
 
