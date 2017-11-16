@@ -93,16 +93,22 @@ def get_archive_name(tardir, compress):
                 taridx, tarext))
 
 
+def filter_files(fileinfo, filetype=None, limit=0, verbose=False):
+    if fileinfo.isfile() and ((0 < limit < fileinfo.size) or
+            (filetype and os.path.splitext(fileinfo.name)[1] not in filetype)):
+        return None
+    else:
+        if verbose:
+            print('Adding {}'.format(fileinfo.name))
+        return fileinfo
+
+
 def archive_files(
         source, target, compress=False, rsync=False,
         filetype=None, limit=0, verbose=False):
     verboseprint = print if verbose else lambda *a, **k: None
-    target_filter = lambda fileinfo: (
-            None if fileinfo.isfile() and (
-                (0 < limit < fileinfo.size) or
-                (filetype and os.path.splitext(
-                    fileinfo.name)[1] not in filetype))
-                else fileinfo)
+    target_filter = lambda fileinfo: filter_files(
+            fileinfo, filetype, limit, verbose)
     tardir, tarfn = os.path.split(target)
     target_iteration = list_archives(
             tardir,
@@ -119,7 +125,6 @@ def archive_files(
                         fileobj=target_buffer,
                         mode='w|xz' if compress else 'w|') as target_fid:
                     for root in source:
-                        verboseprint('Adding {}'.format(root))
                         target_fid.add(root, filter=target_filter)
                 target_buffer.seek(0)
 
@@ -140,7 +145,6 @@ def archive_files(
             with tarfile.open(
                     target, 'w:xz' if compress else 'w') as target_fid:
                 for root in source:
-                    verboseprint('Adding {}'.format(root))
                     target_fid.add(root, filter=target_filter)
 
     except FileNotFoundError as not_found:
