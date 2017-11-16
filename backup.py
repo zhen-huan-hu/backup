@@ -131,12 +131,14 @@ def archive_files(
                 # Write diff file based on rsync algorithm
                 verboseprint('Making the diff file')
                 hashes = pyrsync2.blockchecksums(target_father_fid)
-                delta = pyrsync2.rsyncdelta(target_buffer, hashes)
+                delta = pyrsync2.rsyncdelta(
+                        target_buffer, hashes, max_buffer=65535)
                 for element in delta:
                     if isinstance(element, int):
                         diff_fid.write(b'\x00\x00')
                         diff_fid.write(element.to_bytes(8, byteorder='big'))
                     else:
+                        verboseprint('Saving {} bytes'.format(len(element)))
                         diff_fid.write(
                                 len(element).to_bytes(2, byteorder='big'))
                         diff_fid.write(element)
