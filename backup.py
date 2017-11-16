@@ -168,24 +168,25 @@ def extract_files(source, target, diff=None, verbose=False):
     verboseprint = print if verbose else lambda *a, **k: None
     try:
         if diff is not None:
-            with open(source, 'rb') as source_fid, \
+            with open(source, 'rb') as source_father_fid, \
                     open(diff, 'rb') as diff_fid, \
-                    io.BytesIO() as tmp_fid:
+                    io.BytesIO() as source_buffer:
                 byte = diff_fid.read(2)
                 while byte:
                     if byte == b'\x00\x00':
                         offset = int.from_bytes(
                                 diff_fid.read(8), byteorder='big')
-                        source_fid.seek(offset * 4096)
-                        tmp_fid.write(source_fid.read(4096))
+                        source_father_fid.seek(offset * 4096)
+                        source_buffer.write(source_father_fid.read(4096))
                     else:
-                        tmp_fid.write(
+                        source_buffer.write(
                                 diff_fid.read(
                                     int.from_bytes(byte, byteorder='big')))
                     byte = diff_fid.read(2)
-                tmp_fid.seek(0)
-                with tarfile.open(mode='r|*', fileobj=tmp_fid) as tmp_tarfid:
-                    tmp_tarfid.extractall(target)
+                source_buffer.seek(0)
+                with tarfile.open(
+                        mode='r|*', fileobj=source_buffer) as source_fid:
+                    source_fid.extractall(target)
         else:
             with tarfile.open(source, mode='r') as source_fid:
                 source_fid.extractall(target)
