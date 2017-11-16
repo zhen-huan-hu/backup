@@ -97,22 +97,60 @@ def archive_files(
         source, target, compress=False, rsync=False,
         filetype=None, limit=0, verbose=False):
     verboseprint = print if verbose else lambda *a, **k: None
+    tardir, tarfn = os.path.split(target)
+    target_iteration = list_archives(
+            tardir,
+            # Each month is an iteration
+            re.compile(re.match('{0}-\d{{4}}-\d{{2}}'.format(
+                socket.gethostname()), tarfn).group(0)))
     try:
-        # Open TAR file for writing
-        with tarfile.open(target, 'w:xz' if compress else 'w') as target_fid:
-            for root in source:
-                verboseprint('Adding {}'.format(root))
-                target_fid.add(
-                        root, filter=lambda fileinfo: (
-                            None if fileinfo.isfile() and (
-                                (filetype and os.path.splitext(
-                                    fileinfo.name)[1] not in filetype) or
-                                (0 < limit < fileinfo.size))
-                            else fileinfo))
+        if rsync and target_iteration:
+            with io.BytesIO() as target_buffer, \
+                    open(target_iteration[0], 'rb') as target_father_fid, \
+                    open(target + '.diff', 'wb') as diff_fid:
+                # Open TAR buffer for writing
+                with tarfile.open(
+                        fileobj=target_buffer,
+                        mode='w|xz' if compress else 'w|') as target_fid:
+                    for root in source:
+                        verboseprint('Adding {}'.format(root))
+                        target_fid.add(
+                                root, filter=lambda fileinfo: (
+                                    None if fileinfo.isfile() and (
+                                        (0 < limit < fileinfo.size) or
+                                        (filetype and os.path.splitext(
+                                            fileinfo.name)[1] not in filetype))
+                                    else fileinfo))
+                target_buffer.seek(0)
+
+                # Write diff file based on rsync algorithm
+                verboseprint('Making the diff file')
+                hashes = pyrsync2.blockchecksums(target_father_fid)
+                delta = pyrsync2.rsyncdelta(target_buffer, hashes)
+                for element in delta:
+                    if isinstance(element, int):
+                        diff_fid.write(b'\x00\x00')
+                        diff_fid.write(element.to_bytes(8, byteorder='big'))
+                    else:
+                        diff_fid.write(
+                                len(element).to_bytes(2, byteorder='big'))
+                        diff_fid.write(element)
+        else:
+            # Open TAR file for writing
+            with tarfile.open(
+                    target, 'w:xz' if compress else 'w') as target_fid:
+                for root in source:
+                    verboseprint('Adding {}'.format(root))
+                    target_fid.add(
+                            root, filter=lambda fileinfo: (
+                                None if fileinfo.isfile() and (
+                                    (0 < limit < fileinfo.size) or
+                                    (filetype and os.path.splitext(
+                                        fileinfo.name)[1] not in filetype))
+                                else fileinfo))
 
     except FileNotFoundError as not_found:
-        if not_found.filename == target:
-            tardir = os.path.dirname(target)
+        if os.path.dirname(not_found.filename) == tardir:
             verboseprint('Making directory {}'.format(tardir))
             os.makedirs(tardir)
             return archive_files(
@@ -123,30 +161,6 @@ def archive_files(
             return False
 
     else:
-        if rsync:
-            tardir, tarfn = os.path.split(target)
-            target_iteration = list_archives(
-                    tardir,
-                    # Each month is an iteration
-                    re.compile(re.match('{0}-\d{{4}}-\d{{2}}'.format(
-                        socket.gethostname()), tarfn).group(0)))
-            if len(target_iteration) > 1:
-                # Write diff file based on rsync algorithm
-                with open(target_iteration[0], 'rb') as target_father_fid, \
-                        open(target, 'rb') as target_fid, \
-                        open(target + '.diff', 'wb') as diff_fid:
-                    verboseprint('Making diff file')
-                    hashes = pyrsync2.blockchecksums(target_father_fid)
-                    delta = pyrsync2.rsyncdelta(target_fid, hashes)
-                    for element in delta:
-                        if isinstance(element, int):
-                            diff_fid.write(b'\x00\x00')
-                            diff_fid.write(element.to_bytes(8, byteorder='big'))
-                        else:
-                            diff_fid.write(
-                                    len(element).to_bytes(2, byteorder='big'))
-                            diff_fid.write(element)
-                os.remove(target)
         return True
 
 
