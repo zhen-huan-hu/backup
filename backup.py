@@ -97,6 +97,12 @@ def archive_files(
         source, target, compress=False, rsync=False,
         filetype=None, limit=0, verbose=False):
     verboseprint = print if verbose else lambda *a, **k: None
+    target_filter = lambda fileinfo: (
+            None if fileinfo.isfile() and (
+                (0 < limit < fileinfo.size) or
+                (filetype and os.path.splitext(
+                    fileinfo.name)[1] not in filetype))
+                else fileinfo)
     tardir, tarfn = os.path.split(target)
     target_iteration = list_archives(
             tardir,
@@ -114,13 +120,7 @@ def archive_files(
                         mode='w|xz' if compress else 'w|') as target_fid:
                     for root in source:
                         verboseprint('Adding {}'.format(root))
-                        target_fid.add(
-                                root, filter=lambda fileinfo: (
-                                    None if fileinfo.isfile() and (
-                                        (0 < limit < fileinfo.size) or
-                                        (filetype and os.path.splitext(
-                                            fileinfo.name)[1] not in filetype))
-                                    else fileinfo))
+                        target_fid.add(root, filter=target_filter)
                 target_buffer.seek(0)
 
                 # Write diff file based on rsync algorithm
@@ -141,13 +141,7 @@ def archive_files(
                     target, 'w:xz' if compress else 'w') as target_fid:
                 for root in source:
                     verboseprint('Adding {}'.format(root))
-                    target_fid.add(
-                            root, filter=lambda fileinfo: (
-                                None if fileinfo.isfile() and (
-                                    (0 < limit < fileinfo.size) or
-                                    (filetype and os.path.splitext(
-                                        fileinfo.name)[1] not in filetype))
-                                else fileinfo))
+                    target_fid.add(root, filter=target_filter)
 
     except FileNotFoundError as not_found:
         if os.path.dirname(not_found.filename) == tardir:
