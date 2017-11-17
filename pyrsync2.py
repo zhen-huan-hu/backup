@@ -1,5 +1,4 @@
-"""
-This is a pure Python implementation of the [rsync algorithm] [TM96].
+''' This is a pure Python implementation of the [rsync algorithm] [TM96].
 
 ### Example Use Case: ###
 
@@ -14,26 +13,23 @@ This is a pure Python implementation of the [rsync algorithm] [TM96].
     # System with the unpatched file after receiving `delta`
     >>> unpatched.seek(0)
     >>> save_to = open('locally-patched.file', 'wb')
-    >>> patchstream(unpatched, save_to, delta)
-"""
+    >>> patch_stream(unpatched, save_to, delta)
+'''
 
 import hashlib
 
 __all__ = [
-    'weakchecksum',
-    'rollingchecksum',
-    'blockchecksums'
-    'rsyncdelta',
-    'patchstream',
+    'checksum', 'rolling_checksum',
+    'blockchecksums', 'rsyncdelta',
+    'patch_stream',
     ]
 
 
 def rsyncdelta(datastream, hashes, blocksize=4096, max_buffer=4096):
-    """
-    A binary patch generator when supplied with a readable stream for the
-    up-to-date data and the weak and strong hashes from an unpatched target.
-    The blocksize must be the same as the value used to generate the hashes.
-    """
+    ''' Return an iterator of binary patches when supplied with a readable
+        stream of the up-to-date data and a list of hash pair tuples from an
+        unpatched target.
+    '''
     hashdict = {}
     for index, (weak, strong) in enumerate(hashes):
         if weak not in hashdict:
@@ -47,12 +43,12 @@ def rsyncdelta(datastream, hashes, blocksize=4096, max_buffer=4096):
         if match:
             # Whenever there is a match or
             # the loop is running for the first time,
-            # populate the window using weakchecksum instead of rolling
+            # populate the window using checksum instead of rolling
             # through every single byte which takes at least twice as long.
             window = bytearray(datastream.read(blocksize))
             if window:
                 window_offset = 0
-                checksum, a, b = weakchecksum(window)
+                weakkey, a, b = checksum(window)
             else:
                 break
         else:
@@ -76,17 +72,17 @@ def rsyncdelta(datastream, hashes, blocksize=4096, max_buffer=4096):
             current_block.append(oldbyte)
             window_offset += 1
             # Yank off the extra byte and calculate the new window checksum
-            checksum, a, b = rollingchecksum(oldbyte, newbyte, a, b, blocksize)
+            weakkey, a, b = rolling_checksum(oldbyte, newbyte, a, b, blocksize)
 
         strongkey = hashlib.md5(window[window_offset:]).digest() if (
-                checksum in hashdict) else None
-        if checksum in hashdict and strongkey in hashdict[checksum]:
+                weakkey in hashdict) else None
+        if weakkey in hashdict and strongkey in hashdict[weakkey]:
             match = True
 
             if current_block:
                 yield bytes(current_block)
                 current_block = bytearray()
-            yield hashdict[checksum][strongkey]
+            yield hashdict[weakkey][strongkey]
 
             if datastream is None:
                 break
@@ -108,47 +104,42 @@ def rsyncdelta(datastream, hashes, blocksize=4096, max_buffer=4096):
                 break
 
 
-def blockchecksums(instream, blocksize=4096):
-    """
-    A generator of the (weak hash (int), strong hash (bytes)) tuples
-    for each block of the defined size for the given data stream.
-    """
-    read = instream.read(blocksize)
+def blockchecksums(in_stream, blocksize=4096):
+    ''' Return an iterator of the (weak hash (int), strong hash (bytes)) tuples
+        for each block of the given data stream.
+    '''
+    read = in_stream.read(blocksize)
     while read:
-        yield (weakchecksum(read)[0], hashlib.md5(read).digest())
-        read = instream.read(blocksize)
+        yield (checksum(read)[0], hashlib.md5(read).digest())
+        read = in_stream.read(blocksize)
 
 
-def patchstream(instream, outstream, delta, blocksize=4096):
-    """
-    Patches instream using the supplied delta and write the resultantant
-    data to outstream.
-    """
+def patch_stream(in_stream, out_stream, delta, blocksize=4096):
+    ''' Patch the in-stream data based on the binary patch delta and write the
+        resultantant data to the out-stream.
+    '''
     for element in delta:
-        if isinstance(element, int) and blocksize:
-            instream.seek(element * blocksize)
-            element = instream.read(blocksize)
-        outstream.write(element)
+        if isinstance(element, int):
+            in_stream.seek(element * blocksize)
+            element = in_stream.read(blocksize)
+        out_stream.write(element)
 
 
-def rollingchecksum(old, new, a, b, blocksize=4096):
-    """
-    Generate a new weak checksum when supplied with
-    the internal state of the checksum calculation for the previous window,
-    the old byte, and the new byte.
-    """
+def rolling_checksum(old, new, a, b, blocksize=4096):
+    ''' Return a new weak checksum when supplied with the internal state of the
+        checksum calculation from the previous window, the removed old byte,
+        and the added new byte.
+    '''
     a -= old - new
     b -= old * blocksize - a
     return (b << 16) | a, a, b
 
 
-def weakchecksum(data):
-    """
-    Generate a weak checksum from an iterable set of bytes.
-    """
+def checksum(block):
+    ''' Return a weak checksum from an iterable set of bytes. '''
     a = b = 0
-    l = len(data)
-    for i in range(l):
-        a += data[i]
-        b += (l - i) * data[i]
+    blocksize = len(block)
+    for i in range(blocksize):
+        a += block[i]
+        b += (blocksize - i) * block[i]
     return (b << 16) | a, a, b
