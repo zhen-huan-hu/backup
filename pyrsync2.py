@@ -28,16 +28,18 @@ __all__ = [
     ]
 
 
-def rsyncdelta(datastream, remotesignatures, blocksize=4096, max_buffer=4096):
+def rsyncdelta(datastream, hashes, blocksize=4096, max_buffer=4096):
     """
     A binary patch generator when supplied with a readable stream for the
     up-to-date data and the weak and strong hashes from an unpatched target.
     The blocksize must be the same as the value used to generate the hashes.
     """
-    remotesignatures = {
-        weak: (index, strong) for index, (weak, strong)
-        in enumerate(remotesignatures)
-        }
+    hashdict = {}
+    for index, (weak, strong) in enumerate(hashes):
+        if weak not in hashdict:
+            hashdict[weak] = {}
+        hashdict[weak][strong] = index
+        
     match = True
     current_block = bytearray()
 
@@ -76,15 +78,15 @@ def rsyncdelta(datastream, remotesignatures, blocksize=4096, max_buffer=4096):
             # Yank off the extra byte and calculate the new window checksum
             checksum, a, b = rollingchecksum(oldbyte, newbyte, a, b, blocksize)
 
-        if (checksum in remotesignatures and
-                remotesignatures[checksum][1] ==
-                hashlib.md5(window[window_offset:]).digest()):
+        strongkey = hashlib.md5(window[window_offset:]).digest() if (
+                checksum in hashdict) else None
+        if checksum in hashdict and strongkey in hashdict[checksum]:
             match = True
 
             if current_block:
                 yield bytes(current_block)
                 current_block = bytearray()
-            yield remotesignatures[checksum][0]
+            yield hashdict[checksum][strongkey]
 
             if datastream is None:
                 break
