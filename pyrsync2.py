@@ -130,16 +130,14 @@ def rolling_checksum(old, new, a, b, blocksize=4096):
         checksum calculation from the previous window, the removed old byte,
         and the added new byte.
     '''
-    a -= old - new
-    b -= old * blocksize - a
+    a = (a - old + new) % 65536
+    b = (b - old * blocksize + a) % 65536
     return (b << 16) | a, a, b
 
 
 def checksum(block):
     ''' Return a weak checksum from an iterable set of bytes. '''
-    a = b = 0
     blocksize = len(block)
-    for i in range(blocksize):
-        a += block[i]
-        b += (blocksize - i) * block[i]
+    a = sum(block[i] for i in range(blocksize)) % 65536
+    b = sum(((blocksize - i) * block[i]) for i in range(blocksize)) % 65536
     return (b << 16) | a, a, b
