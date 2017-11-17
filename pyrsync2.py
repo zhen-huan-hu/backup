@@ -35,7 +35,7 @@ def rsyncdelta(datastream, hashes, blocksize=4096, max_buffer=4096):
         if weak not in hashdict:
             hashdict[weak] = {}
         hashdict[weak][strong] = index
-        
+
     match = True
     current_block = bytearray()
 
